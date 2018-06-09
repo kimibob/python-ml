@@ -5,7 +5,9 @@ import time
 from sklearn import metrics
 import matplotlib.pyplot as plt
 from sklearn import preprocessing
+from numpy import set_printoptions
 
+set_printoptions(precision=4)
 boston = load_boston()
 
 #print(boston)
