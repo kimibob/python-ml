@@ -1,0 +1,134 @@
+# -*- coding: utf-8 -*-
+"""
+Created on Thu Jul  5 14:52:18 2018
+
+@author: kimibob
+"""
+
+import pandas as pd
+from pandas import Series
+from statsmodels.graphics.tsaplots import plot_acf
+from statsmodels.graphics.tsaplots import plot_pacf
+from matplotlib import pyplot
+import numpy as np
+
+def _diff_smooth(ts):
+    from datetime import date,timedelta
+    dif = ts.diff().dropna() # 差分序列
+    td = dif.describe() # 描述性统计得到：min，25%，50%，75%，max值
+    high = td['75%'] + 1.5 * (td['75%'] - td['25%']) # 定义高点阈值，1.5倍四分位距之外
+    low = td['25%'] - 1.5 * (td['75%'] - td['25%']) # 定义低点阈值，同上
+    
+    # 变化幅度超过阈值的点的索引
+    forbid_index = dif[(dif > high) | (dif < low)].index 
+    print(">>>",forbid_index)
+    i = 0
+    while i < len(forbid_index) - 1:
+        n = 1 # 发现连续多少个点变化幅度过大，大部分只有单个点
+        start = forbid_index[i] # 异常点的起始索引
+        while forbid_index[i+n] == start + timedelta(days=n):
+            n += 1
+        i += n - 1
+
+        end = forbid_index[i] # 异常点的结束索引
+        # 用前后值的中间值均匀填充
+        value = np.linspace(ts[start - timedelta(days=1)], ts[end + timedelta(days=1)], n)
+        ts[start: end] = value
+        i += 1
+    print(ts)
+    
+    
+# 差分函数
+def difference(dataset):
+    diff = list()
+    for i in range(1, len(dataset)):
+        value = dataset[i] - dataset[i - 1]
+        diff.append(value)
+    return Series(diff)
+
+# 逆差分函数
+def inverse_difference(history, yhat, interval=1):
+	return yhat + history[-interval]
+
+#预测函数
+def amima_forecast(filepath,file_name,output_path):
+
+    series = Series.from_csv(filepath+file_name)
+    #_diff_smooth(series)
+
+    X = series.values
+    #rolmean = pd.rolling_mean(series, window=60) 
+    #rol_weighted_mean = pd.ewma(series, span=12)
+    X = X.astype('float32')
+    # 差分化数据
+    stationary = difference(X)
+    # 差分化数据  #1阶差分，丢弃na值
+    stationary.index = series.index[1:]
+    #stationary.plot(label='stationary',legend=True)
+    """自相关,偏相关计算
+    pyplot.figure()
+    pyplot.subplot(211)
+    plot_acf(stationary, ax=pyplot.gca())
+    pyplot.subplot(212)
+    plot_pacf(stationary, ax=pyplot.gca())
+    pyplot.show()
+    """
+    
+    from statsmodels.tsa.arima_model import ARIMA,ARMA
+    model = ARIMA(stationary, order=(10,0,1))
+    #model = ARMA(stationary, order=(20,14))
+    model_fit = model.fit(disp=-1)
+    pre = model_fit.forecast(181)[0]
+    
+    history = [x for x in X]
+    day = 1
+    for yhat in pre:
+    	inverted = inverse_difference(history, yhat, 1)
+    	#print('Day %d: %f' % (day, inverted))
+    	history.append(inverted)
+    	day += 1
+    
+    s=Series(pre)
+    time_series_restored = pd.Series([series[-1]], index=[series.index[-1]]).append(s).cumsum()
+    
+    forecast=pd.Series(time_series_restored.values,index=pd.DatetimeIndex(start='2018-07-03',end='2018-12-31',freq='D'))
+    #print(forecast)
+    
+    history_ser=pd.Series(history,index=pd.DatetimeIndex(start='2018-01-01',end='2018-12-31',freq='D'))
+    #print(forecast)
+    
+    import matplotlib.pyplot as plt   
+    #series = Series.from_csv('d:\dataflow.csv', header=0)
+    #plt.plot(model_fit.fittedvalues, color='red')
+    series.plot(label='history_data',legend=True)
+    forecast.plot(label='forecast_data',legend=True)
+    #rolmean.plot(color='red', label='Rolling Mean')
+    #rol_weighted_mean.plot(color='green', label='weighted Mean')
+    #history_ser.plot(label='histo_data',legend=True)
+    plt.savefig(output_path+file_name[:-4]+".jpg")
+    plt.show()   
+    history_ser.to_csv(output_path+file_name)
+
+import os
+datapath = "H:\\capacity_data\\"
+output_path = "H:\\capacity_output\\"
+list_dirs = os.walk(datapath)
+for parent_dir, sub_dir, files in list_dirs:
+    for file_name in files:
+        if os.path.exists(output_path+file_name):
+            os.rename(datapath+file_name,"H:\\capacity_over\\"+file_name)
+            continue
+        try:
+            amima_forecast(datapath,file_name,output_path)
+            os.rename(datapath+file_name,"H:\\capacity_over\\"+file_name)
+        except:
+            file = open(output_path +file_name+ '.txt','w')
+            file.close()
+            continue
+	
+
+"""
+vs_train=model_fit.fittedvalues
+vs_train_restored = pd.Series([series[0]], index=[series.index[0]]).append(vs_train).cumsum()
+
+"""
